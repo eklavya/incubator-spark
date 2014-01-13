@@ -21,11 +21,11 @@ import scala.reflect.ClassTag
 
 import org.apache.spark._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.api.java.function.{Function => JFunction}
+import org.apache.spark.api.java.function.{Function => JFunction, Function2 => JFunction2}
 import org.apache.spark.storage.StorageLevel
 
 class JavaRDD[T](val rdd: RDD[T])(implicit val classTag: ClassTag[T]) extends
-JavaRDDLike[T, JavaRDD[T]] {
+  JavaRDDLike[T, JavaRDD[T]] {
 
   override def wrapRDD(rdd: RDD[T]): JavaRDD[T] = JavaRDD.fromRDD(rdd)
 
@@ -71,6 +71,14 @@ JavaRDDLike[T, JavaRDD[T]] {
    */
   def filter(f: JFunction[T, java.lang.Boolean]): JavaRDD[T] =
     wrapRDD(rdd.filter((x => f(x).booleanValue())))
+
+  /**
+   * Filters this RDD with p, where p takes an additional parameter of type A.  This
+   * additional parameter is produced by constructA, which is called in each
+   * partition with the index of that partition.
+   */
+  def filterWith[A](constructA: JFunction[Int, A], f: JFunction2[T, A, java.lang.Boolean]):
+    JavaRDD[T] = wrapRDD(rdd.filterWith[A](x => constructA(x))((x, y) => f(x, y).booleanValue()))
 
   /**
    * Return a new RDD that is reduced into `numPartitions` partitions.
