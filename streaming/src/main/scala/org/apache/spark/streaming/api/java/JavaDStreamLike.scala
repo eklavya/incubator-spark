@@ -234,6 +234,13 @@ trait JavaDStreamLike[T, This <: JavaDStreamLike[T, This, R], R <: JavaRDDLike[T
   }
 
   /**
+   * Return all the RDDs defined by the Interval object (both end times included)
+   */
+  def slice(interval: Interval): JList[R] = {
+    slice(interval.beginTime, interval.endTime)
+  }
+
+  /**
    * Return all the RDDs between 'fromDuration' to 'toDuration' (both included)
    */
   def slice(fromTime: Time, toTime: Time): JList[R] = {
