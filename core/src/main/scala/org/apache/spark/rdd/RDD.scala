@@ -503,7 +503,7 @@ abstract class RDD[T: ClassTag](
    */
   def flatMapWith[A, U: ClassTag]
       (constructA: Int => A, preservesPartitioning: Boolean = false)
-      (f: (T, A) => Seq[U]): RDD[U] = {
+      (f: (T, A) => TraversableOnce[U]): RDD[U] = {
     mapPartitionsWithIndex((index, iter) => {
       val a = constructA(index)
       iter.flatMap(t => f(t, a))
