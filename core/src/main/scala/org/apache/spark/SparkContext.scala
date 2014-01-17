@@ -240,10 +240,6 @@ class SparkContext(
     localProperties.set(props)
   }
 
-  def initLocalProperties() {
-    localProperties.set(new Properties())
-  }
-
   /**
    * Set a local property that affects jobs submitted from this thread, such as the
    * Spark fair scheduler pool.
@@ -308,7 +304,7 @@ class SparkContext(
   private val dagSchedulerSource = new DAGSchedulerSource(this.dagScheduler, this)
   private val blockManagerSource = new BlockManagerSource(SparkEnv.get.blockManager, this)
 
-  def initDriverMetrics() {
+  private def initDriverMetrics() {
     SparkEnv.get.metricsSystem.registerSource(dagSchedulerSource)
     SparkEnv.get.metricsSystem.registerSource(blockManagerSource)
   }
