@@ -94,9 +94,23 @@ class JavaSparkContext(val sc: SparkContext) extends JavaSparkContextVarargsWork
 
   private[spark] val env = sc.env
 
-  def isLocal(): Boolean = sc.isLocal
+  def isLocal: Boolean = sc.isLocal
 
-  def sparkUser() = sc.sparkUser
+  def sparkUser = sc.sparkUser
+
+  def master = sc.master
+
+  def appName = sc.appName
+
+  def jars = sc.jars
+
+  def startTime = sc.startTime
+
+  /** Default level of parallelism to use when not given by user (e.g. parallelize and makeRDD). */
+  def defaultParallelism: Int = sc.defaultParallelism
+
+  /** Default min number of partitions for Hadoop RDDs when not given by user */
+  def defaultMinSplits: Int = sc.defaultMinSplits
 
   /** Distribute a local Scala collection to form an RDD. */
   def parallelize[T](list: java.util.List[T], numSlices: Int): JavaRDD[T] = {
