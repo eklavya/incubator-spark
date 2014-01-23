@@ -480,7 +480,7 @@ private[spark] class Master(host: String, port: Int, webUiPort: Int) extends Act
         for (pos <- 0 until numUsable) {
           if (assigned(pos) > 0) {
             val exec = app.addExecutor(usableWorkers(pos), assigned(pos))
-            launchExecutor(usableWorkers(pos), exec, app.desc.sparkHome)
+            launchExecutor(usableWorkers(pos), exec)
             app.state = ApplicationState.RUNNING
           }
         }
@@ -493,7 +493,7 @@ private[spark] class Master(host: String, port: Int, webUiPort: Int) extends Act
             val coresToUse = math.min(worker.coresFree, app.coresLeft)
             if (coresToUse > 0) {
               val exec = app.addExecutor(worker, coresToUse)
-              launchExecutor(worker, exec, app.desc.sparkHome)
+              launchExecutor(worker, exec)
               app.state = ApplicationState.RUNNING
             }
           }
@@ -502,11 +502,11 @@ private[spark] class Master(host: String, port: Int, webUiPort: Int) extends Act
     }
   }
 
-  def launchExecutor(worker: WorkerInfo, exec: ExecutorInfo, sparkHome: String) {
+  def launchExecutor(worker: WorkerInfo, exec: ExecutorInfo) {
     logInfo("Launching executor " + exec.fullId + " on worker " + worker.id)
     worker.addExecutor(exec)
     worker.actor ! LaunchExecutor(masterUrl,
-      exec.application.id, exec.id, exec.application.desc, exec.cores, exec.memory, sparkHome)
+      exec.application.id, exec.id, exec.application.desc, exec.cores, exec.memory)
     exec.application.driver ! ExecutorAdded(
       exec.id, worker.id, worker.hostPort, exec.cores, exec.memory)
   }
@@ -515,7 +515,7 @@ private[spark] class Master(host: String, port: Int, webUiPort: Int) extends Act
     // There may be one or more refs to dead workers on this same node (w/ different ID's),
     // remove them.
     workers.filter { w =>
-      (w.host == host && w.port == port) && (w.state == WorkerState.DEAD)
+      (w.host == worker.host && w.port == worker.port) && (w.state == WorkerState.DEAD)
     }.foreach { w =>
       workers -= w
     }

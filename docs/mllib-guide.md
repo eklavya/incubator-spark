@@ -21,6 +21,9 @@ depends on native Fortran routines. You may need to install the
 if it is not already present on your nodes. MLlib will throw a linking error if it cannot 
 detect these libraries automatically.
 
+To use MLlib in Python, you will need [NumPy](http://www.numpy.org) version 1.7 or newer
+and Python 2.7.
+
 # Binary Classification
 
 Binary classification is a supervised learning problem in which we want to
@@ -316,6 +319,13 @@ other signals), you can use the trainImplicit method to get better results.
 val model = ALS.trainImplicit(ratings, 1, 20, 0.01)
 {% endhighlight %}
 
+# Using MLLib in Java
+
+All of MLlib's methods use Java-friendly types, so you can import and call them there the same
+way you do in Scala. The only caveat is that the methods take Scala RDD objects, while the
+Spark Java API uses a separate `JavaRDD` class. You can convert a Java RDD to a Scala one by
+calling `.rdd()` on your `JavaRDD` object.
+
 # Using MLLib in Python
 Following examples can be tested in the PySpark shell.
 
@@ -330,7 +340,7 @@ from numpy import array
 # Load and parse the data
 data = sc.textFile("mllib/data/sample_svm_data.txt")
 parsedData = data.map(lambda line: array([float(x) for x in line.split(' ')]))
-model = LogisticRegressionWithSGD.train(sc, parsedData)
+model = LogisticRegressionWithSGD.train(parsedData)
 
 # Build the model
 labelsAndPreds = parsedData.map(lambda point: (int(point.item(0)),
@@ -356,7 +366,7 @@ data = sc.textFile("mllib/data/ridge-data/lpsa.data")
 parsedData = data.map(lambda line: array([float(x) for x in line.replace(',', ' ').split(' ')]))
 
 # Build the model
-model = LinearRegressionWithSGD.train(sc, parsedData)
+model = LinearRegressionWithSGD.train(parsedData)
 
 # Evaluate the model on training data
 valuesAndPreds = parsedData.map(lambda point: (point.item(0),
@@ -382,7 +392,7 @@ data = sc.textFile("kmeans_data.txt")
 parsedData = data.map(lambda line: array([float(x) for x in line.split(' ')]))
 
 # Build the model (cluster the data)
-clusters = KMeans.train(sc, parsedData, 2, maxIterations=10,
+clusters = KMeans.train(parsedData, 2, maxIterations=10,
         runs=30, initialization_mode="random")
 
 # Evaluate clustering by computing Within Set Sum of Squared Errors
@@ -411,7 +421,7 @@ data = sc.textFile("mllib/data/als/test.data")
 ratings = data.map(lambda line: array([float(x) for x in line.split(',')]))
 
 # Build the recommendation model using Alternating Least Squares
-model = ALS.train(sc, ratings, 1, 20)
+model = ALS.train(ratings, 1, 20)
 
 # Evaluate the model on training data
 testdata = ratings.map(lambda p: (int(p[0]), int(p[1])))
@@ -426,5 +436,56 @@ signals), you can use the trainImplicit method to get better results.
 
 {% highlight python %}
 # Build the recommendation model using Alternating Least Squares based on implicit ratings
-model = ALS.trainImplicit(sc, ratings, 1, 20)
+model = ALS.trainImplicit(ratings, 1, 20)
 {% endhighlight %}
+
+
+# Singular Value Decomposition
+Singular Value Decomposition for Tall and Skinny matrices.
+Given an *m x n* matrix *A*, we can compute matrices *U, S, V* such that
+
+*A = U * S * V^T*
+
+There is no restriction on m, but we require n^2 doubles to
+fit in memory locally on one machine.
+Further, n should be less than m.
+
+The decomposition is computed by first computing *A^TA = V S^2 V^T*,
+computing SVD locally on that (since n x n is small),
+from which we recover S and V.
+Then we compute U via easy matrix multiplication
+as *U =  A * V * S^-1*
+
+Only singular vectors associated with largest k singular values
+are recovered. If there are k
+such values, then the dimensions of the return will be:
+
+* *S* is *k x k* and diagonal, holding the singular values on diagonal.
+* *U* is *m x k* and satisfies U^T*U = eye(k).
+* *V* is *n x k* and satisfies V^TV = eye(k).
+
+All input and output is expected in sparse matrix format, 0-indexed
+as tuples of the form ((i,j),value) all in
+SparseMatrix RDDs. Below is example usage.
+
+{% highlight scala %}
+
+import org.apache.spark.SparkContext
+import org.apache.spark.mllib.linalg.SVD
+import org.apache.spark.mllib.linalg.SparseMatrix
+import org.apache.spark.mllib.linalg.MatrixEntry
+
+// Load and parse the data file
+val data = sc.textFile("mllib/data/als/test.data").map { line =>
+  val parts = line.split(',')
+  MatrixEntry(parts(0).toInt, parts(1).toInt, parts(2).toDouble)
+}
+val m = 4
+val n = 4
+val k = 1
+
+// recover largest singular vector
+val decomposed = SVD.sparseSVD(SparseMatrix(data, m, n), k)
+val = decomposed.S.data
+
+println("singular values = " + s.toArray.mkString)

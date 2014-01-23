@@ -336,8 +336,8 @@ class SparkContext(
    * Hadoop-supported file system URI, and return it as an RDD of Strings.
    */
   def textFile(path: String, minSplits: Int = defaultMinSplits): RDD[String] = {
-    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text], minSplits)
-      .map(pair => pair._2.toString)
+    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
+      minSplits, cloneRecords = false).map(pair => pair._2.toString)
   }
 
   /**
@@ -704,8 +704,11 @@ class SparkContext(
                 env.httpFileServer.addJar(new File(fileName))
               } catch {
                 case e: Exception => {
+                  // For now just log an error but allow to go through so spark examples work.
+                  // The spark examples don't really need the jar distributed since its also 
+                  // the app jar.
                   logError("Error adding jar (" + e + "), was the --addJars option used?")
-                  throw e
+                  null
                 }
               }
             } else {
@@ -718,8 +721,10 @@ class SparkContext(
             path
         }
       }
-      addedJars(key) = System.currentTimeMillis
-      logInfo("Added JAR " + path + " at " + key + " with timestamp " + addedJars(key))
+      if (key != null) {
+        addedJars(key) = System.currentTimeMillis
+        logInfo("Added JAR " + path + " at " + key + " with timestamp " + addedJars(key))
+      }
     }
   }
 
@@ -782,8 +787,11 @@ class SparkContext(
 
   private[spark] def getCallSite(): String = {
     val callSite = getLocalProperty("externalCallSite")
-    if (callSite == null) return Utils.formatSparkCallSite
-    callSite
+    if (callSite == null) {
+      Utils.formatSparkCallSite
+    } else {
+      callSite
+    }
   }
 
   /**
@@ -933,7 +941,7 @@ class SparkContext(
    */
   private[spark] def clean[F <: AnyRef](f: F): F = {
     ClosureCleaner.clean(f)
-    return f
+    f
   }
 
   /**
@@ -945,9 +953,11 @@ class SparkContext(
       val path = new Path(dir, UUID.randomUUID().toString)
       val fs = path.getFileSystem(hadoopConfiguration)
       fs.mkdirs(path)
-      fs.getFileStatus(path).getPath().toString
+      fs.getFileStatus(path).getPath.toString
     }
   }
+
+  def getCheckpointDir = checkpointDir
 
   /** Default level of parallelism to use when not given by user (e.g. parallelize and makeRDD). */
   def defaultParallelism: Int = taskScheduler.defaultParallelism
@@ -1118,7 +1128,7 @@ object SparkContext {
     if (sparkHome != null) {
       res.setSparkHome(sparkHome)
     }
-    if (!jars.isEmpty) {
+    if (jars != null && !jars.isEmpty) {
       res.setJars(jars)
     }
     res.setExecutorEnv(environment.toSeq)

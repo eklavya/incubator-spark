@@ -17,7 +17,7 @@
 
 package org.apache.spark.streaming
 
-import org.apache.spark.streaming.dstream.{InputDStream, ForEachDStream}
+import org.apache.spark.streaming.dstream.{DStream, InputDStream, ForEachDStream}
 import org.apache.spark.streaming.util.ManualClock
 
 import scala.collection.mutable.ArrayBuffer
@@ -156,7 +156,6 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
   def afterFunction() {
     // To avoid Akka rebinding to the same port, since it doesn't unbind immediately on shutdown
     System.clearProperty("spark.driver.port")
-    System.clearProperty("spark.hostPort")
   }
 
   before(beforeFunction)
@@ -182,8 +181,7 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
     val operatedStream = operation(inputStream)
     val outputStream = new TestOutputStreamWithPartitions(operatedStream,
       new ArrayBuffer[Seq[Seq[V]]] with SynchronizedBuffer[Seq[Seq[V]]])
-    ssc.registerInputStream(inputStream)
-    ssc.registerOutputStream(outputStream)
+    outputStream.register()
     ssc
   }
 
@@ -208,9 +206,7 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
     val operatedStream = operation(inputStream1, inputStream2)
     val outputStream = new TestOutputStreamWithPartitions(operatedStream,
       new ArrayBuffer[Seq[Seq[W]]] with SynchronizedBuffer[Seq[Seq[W]]])
-    ssc.registerInputStream(inputStream1)
-    ssc.registerInputStream(inputStream2)
-    ssc.registerOutputStream(outputStream)
+    outputStream.register()
     ssc
   }
 

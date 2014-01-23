@@ -48,18 +48,20 @@ object SparkBuild extends Build {
   lazy val core = Project("core", file("core"), settings = coreSettings)
 
   lazy val repl = Project("repl", file("repl"), settings = replSettings)
-    .dependsOn(core, bagel, mllib)
+    .dependsOn(core, graphx, bagel, mllib)
 
   lazy val tools = Project("tools", file("tools"), settings = toolsSettings) dependsOn(core) dependsOn(streaming)
 
   lazy val bagel = Project("bagel", file("bagel"), settings = bagelSettings) dependsOn(core)
+
+  lazy val graphx = Project("graphx", file("graphx"), settings = graphxSettings) dependsOn(core)
 
   lazy val streaming = Project("streaming", file("streaming"), settings = streamingSettings) dependsOn(core)
 
   lazy val mllib = Project("mllib", file("mllib"), settings = mllibSettings) dependsOn(core)
 
   lazy val assemblyProj = Project("assembly", file("assembly"), settings = assemblyProjSettings)
-    .dependsOn(core, bagel, mllib, repl, streaming) dependsOn(maybeYarn: _*)
+    .dependsOn(core, graphx, bagel, mllib, repl, streaming) dependsOn(maybeYarn: _*)
 
   lazy val assembleDeps = TaskKey[Unit]("assemble-deps", "Build assembly of dependencies and packages Spark projects")
 
@@ -109,10 +111,10 @@ object SparkBuild extends Build {
   lazy val allExternalRefs = Seq[ProjectReference](externalTwitter, externalKafka, externalFlume, externalZeromq, externalMqtt)
 
   lazy val examples = Project("examples", file("examples"), settings = examplesSettings)
-    .dependsOn(core, mllib, bagel, streaming, externalTwitter) dependsOn(allExternal: _*)
+    .dependsOn(core, mllib, graphx, bagel, streaming, externalTwitter) dependsOn(allExternal: _*)
 
   // Everything except assembly, tools and examples belong to packageProjects
-  lazy val packageProjects = Seq[ProjectReference](core, repl, bagel, streaming, mllib) ++ maybeYarnRef
+  lazy val packageProjects = Seq[ProjectReference](core, repl, bagel, streaming, mllib, graphx) ++ maybeYarnRef
 
   lazy val allProjects = packageProjects ++ allExternalRefs ++ Seq[ProjectReference](examples, tools, assemblyProj)
 
@@ -136,6 +138,13 @@ object SparkBuild extends Build {
     javaOptions += "-Xmx3g",
     // Show full stack trace and duration in test cases.
     testOptions in Test += Tests.Argument("-oDF"),
+    // Remove certain packages from Scaladoc
+    scalacOptions in (Compile,doc) := Seq("-skip-packages", Seq(
+      "akka",
+      "org.apache.spark.network",
+      "org.apache.spark.deploy",
+      "org.apache.spark.util.collection"
+      ).mkString(":")),
 
     // Only allow one test at a time, even across projects, since they run in the same JVM
     concurrentRestrictions in Global += Tags.limit(Tags.Test, 1),
@@ -268,7 +277,6 @@ object SparkBuild extends Build {
         "com.codahale.metrics"     % "metrics-graphite" % "3.0.0",
         "com.twitter"             %% "chill"            % "0.3.1",
         "com.twitter"              % "chill-java"       % "0.3.1",
-        "com.typesafe"             % "config"           % "1.0.2",
         "com.clearspring.analytics" % "stream"          % "2.5.1"
       )
   )
@@ -306,6 +314,13 @@ object SparkBuild extends Build {
   def toolsSettings = sharedSettings ++ Seq(
     name := "spark-tools"
   ) ++ assemblySettings ++ extraAssemblySettings
+
+  def graphxSettings = sharedSettings ++ Seq(
+    name := "spark-graphx",
+    libraryDependencies ++= Seq(
+      "org.apache.commons" % "commons-math3" % "3.2"
+    )
+  )
 
   def bagelSettings = sharedSettings ++ Seq(
     name := "spark-bagel"
