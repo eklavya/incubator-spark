@@ -228,6 +228,37 @@ public class JavaAPISuite implements Serializable {
   }
 
   @Test
+  public void filterWith() {
+    JavaRDD<Integer> ints = sc.parallelize(Arrays.asList(1, 2, 3, 4, 5, 6), 2);
+    Function<Integer, Random> random = new Function<Integer, Random>() {
+      @Override
+      public Random call(Integer a) {
+        return new Random(a + 42);
+      }
+    };
+    Function2<Integer, Random, Boolean> f = new Function2<Integer, Random, Boolean>() {
+      @Override
+      public Boolean call(Integer a, Random r) {
+        return r.nextInt(3) == 0;
+      }
+    };
+    List<Integer> sample = ints.filterWith(random, f).collect();
+    Random prng42 = new Random(42);
+    Random prng43 = new Random(43);
+    List<Integer> is = new ArrayList<Integer>(Arrays.asList(1, 2, 3, 4, 5, 6));
+    Iterator<Integer> it = is.iterator();
+    while(it.hasNext()) {
+      Integer j = it.next();
+      if (j < 4) {
+        if (0 != prng42.nextInt(3)) it.remove();
+      }
+      else if (0 != prng43.nextInt(3)) it.remove();
+    }
+    Assert.assertEquals(sample.size(), is.size());
+    for (int i = 0; i < sample.size(); i++) Assert.assertEquals(sample.get(i), is.get(i));
+  }
+
+  @Test
   public void foldReduce() {
     JavaRDD<Integer> rdd = sc.parallelize(Arrays.asList(1, 1, 2, 3, 5, 8, 13));
     Function2<Integer, Integer, Integer> add = new Function2<Integer, Integer, Integer>() {

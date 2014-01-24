@@ -77,7 +77,7 @@ class JavaRDD[T](val rdd: RDD[T])(implicit val classTag: ClassTag[T]) extends
    * additional parameter is produced by constructA, which is called in each
    * partition with the index of that partition.
    */
-  def filterWith[A](constructA: JFunction[Int, A], f: JFunction2[T, A, java.lang.Boolean]):
+  def filterWith[A](constructA: JFunction[java.lang.Integer, A], f: JFunction2[T, A, java.lang.Boolean]):
     JavaRDD[T] = wrapRDD(rdd.filterWith[A](x => constructA(x))((x, y) => f(x, y).booleanValue()))
 
   /**
