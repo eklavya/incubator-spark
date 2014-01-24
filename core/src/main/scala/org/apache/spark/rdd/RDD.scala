@@ -487,7 +487,7 @@ abstract class RDD[T: ClassTag](
    * additional parameter is produced by constructA, which is called in each
    * partition with the index of that partition.
    */
-  def mapWith[A: ClassTag, U: ClassTag]
+  def mapWith[A, U: ClassTag]
       (constructA: Int => A, preservesPartitioning: Boolean = false)
       (f: (T, A) => U): RDD[U] = {
     mapPartitionsWithIndex((index, iter) => {
@@ -501,9 +501,9 @@ abstract class RDD[T: ClassTag](
    * additional parameter is produced by constructA, which is called in each
    * partition with the index of that partition.
    */
-  def flatMapWith[A: ClassTag, U: ClassTag]
+  def flatMapWith[A, U: ClassTag]
       (constructA: Int => A, preservesPartitioning: Boolean = false)
-      (f: (T, A) => Seq[U]): RDD[U] = {
+      (f: (T, A) => TraversableOnce[U]): RDD[U] = {
     mapPartitionsWithIndex((index, iter) => {
       val a = constructA(index)
       iter.flatMap(t => f(t, a))
@@ -515,7 +515,7 @@ abstract class RDD[T: ClassTag](
    * This additional parameter is produced by constructA, which is called in each
    * partition with the index of that partition.
    */
-  def foreachWith[A: ClassTag](constructA: Int => A)(f: (T, A) => Unit) {
+  def foreachWith[A](constructA: Int => A)(f: (T, A) => Unit) {
     mapPartitionsWithIndex { (index, iter) =>
       val a = constructA(index)
       iter.map(t => {f(t, a); t})
@@ -527,7 +527,7 @@ abstract class RDD[T: ClassTag](
    * additional parameter is produced by constructA, which is called in each
    * partition with the index of that partition.
    */
-  def filterWith[A: ClassTag](constructA: Int => A)(p: (T, A) => Boolean): RDD[T] = {
+  def filterWith[A](constructA: Int => A)(p: (T, A) => Boolean): RDD[T] = {
     mapPartitionsWithIndex((index, iter) => {
       val a = constructA(index)
       iter.filter(t => p(t, a))
@@ -548,6 +548,11 @@ abstract class RDD[T: ClassTag](
    * *same number of partitions*, but does *not* require them to have the same number
    * of elements in each partition.
    */
+  def zipPartitions[B: ClassTag, V: ClassTag]
+      (rdd2: RDD[B], preservesPartitioning: Boolean)
+      (f: (Iterator[T], Iterator[B]) => Iterator[V]): RDD[V] =
+    new ZippedPartitionsRDD2(sc, sc.clean(f), this, rdd2, preservesPartitioning)
+
   def zipPartitions[B: ClassTag, V: ClassTag]
       (rdd2: RDD[B])
       (f: (Iterator[T], Iterator[B]) => Iterator[V]): RDD[V] =

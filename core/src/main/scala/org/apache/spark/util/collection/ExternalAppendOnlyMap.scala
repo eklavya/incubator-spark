@@ -20,14 +20,15 @@ package org.apache.spark.util.collection
 import java.io._
 import java.util.Comparator
 
-import it.unimi.dsi.fastutil.io.FastBufferedInputStream
-
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
+import it.unimi.dsi.fastutil.io.FastBufferedInputStream
+
 import org.apache.spark.{Logging, SparkEnv}
-import org.apache.spark.serializer.Serializer
-import org.apache.spark.storage.{DiskBlockManager, DiskBlockObjectWriter}
+import org.apache.spark.io.LZFCompressionCodec
+import org.apache.spark.serializer.{KryoDeserializationStream, Serializer}
+import org.apache.spark.storage.{BlockId, BlockManager, DiskBlockObjectWriter}
 
 /**
  * An append-only map that spills sorted content to disk when there is insufficient space for it
@@ -60,7 +61,7 @@ private[spark] class ExternalAppendOnlyMap[K, V, C](
     mergeValue: (C, V) => C,
     mergeCombiners: (C, C) => C,
     serializer: Serializer = SparkEnv.get.serializerManager.default,
-    diskBlockManager: DiskBlockManager = SparkEnv.get.blockManager.diskBlockManager)
+    blockManager: BlockManager = SparkEnv.get.blockManager)
   extends Iterable[(K, C)] with Serializable with Logging {
 
   import ExternalAppendOnlyMap._
@@ -68,6 +69,7 @@ private[spark] class ExternalAppendOnlyMap[K, V, C](
   private var currentMap = new SizeTrackingAppendOnlyMap[K, C]
   private val spilledMaps = new ArrayBuffer[DiskMapIterator]
   private val sparkConf = SparkEnv.get.conf
+  private val diskBlockManager = blockManager.diskBlockManager
 
   // Collective memory threshold shared across all running tasks
   private val maxMemoryThreshold = {
@@ -77,13 +79,25 @@ private[spark] class ExternalAppendOnlyMap[K, V, C](
   }
 
   // Number of pairs in the in-memory map
-  private var numPairsInMemory = 0
+  private var numPairsInMemory = 0L
 
   // Number of in-memory pairs inserted before tracking the map's shuffle memory usage
   private val trackMemoryThreshold = 1000
 
+  // Size of object batches when reading/writing from serializers. Objects are written in
+  // batches, with each batch using its own serialization stream. This cuts down on the size
+  // of reference-tracking maps constructed when deserializing a stream.
+  //
+  // NOTE: Setting this too low can cause excess copying when serializing, since some serializers
+  // grow internal data structures by growing + copying every time the number of objects doubles.
+  private val serializerBatchSize = sparkConf.getLong("spark.shuffle.spill.batchSize", 10000)
+
   // How many times we have spilled so far
   private var spillCount = 0
+
+  // Number of bytes spilled in total
+  private var _memoryBytesSpilled = 0L
+  private var _diskBytesSpilled = 0L
 
   private val fileBufferSize = sparkConf.getInt("spark.shuffle.file.buffer.kb", 100) * 1024
   private val syncWrites = sparkConf.getBoolean("spark.shuffle.sync", false)
@@ -139,21 +153,61 @@ private[spark] class ExternalAppendOnlyMap[K, V, C](
     logWarning("Spilling in-memory map of %d MB to disk (%d time%s so far)"
       .format(mapSize / (1024 * 1024), spillCount, if (spillCount > 1) "s" else ""))
     val (blockId, file) = diskBlockManager.createTempBlock()
-    val writer =
-      new DiskBlockObjectWriter(blockId, file, serializer, fileBufferSize, identity, syncWrites)
+
+    /* IMPORTANT NOTE: To avoid having to keep large object graphs in memory, this approach
+    *  closes and re-opens serialization and compression streams within each file. This makes some
+     * assumptions about the way that serialization and compression streams work, specifically:
+     *
+     * 1) The serializer input streams do not pre-fetch data from the underlying stream.
+     *
+     * 2) Several compression streams can be opened, written to, and flushed on the write path
+     *    while only one compression input stream is created on the read path
+     *
+     * In practice (1) is only true for Java, so we add a special fix below to make it work for
+     * Kryo. (2) is only true for LZF and not Snappy, so we coerce this to use LZF.
+     *
+     * To avoid making these assumptions we should create an intermediate stream that batches
+     * objects and sends an EOF to the higher layer streams to make sure they never prefetch data.
+     * This is a bit tricky because, within each segment, you'd need to track the total number
+     * of bytes written and then re-wind and write it at the beginning of the segment. This will
+     * most likely require using the file channel API.
+     */
+
+    val shouldCompress = blockManager.shouldCompress(blockId)
+    val compressionCodec = new LZFCompressionCodec(sparkConf)
+    def wrapForCompression(outputStream: OutputStream) = {
+      if (shouldCompress) compressionCodec.compressedOutputStream(outputStream) else outputStream
+    }
+
+    def getNewWriter = new DiskBlockObjectWriter(blockId, file, serializer, fileBufferSize,
+      wrapForCompression, syncWrites)
+
+    var writer = getNewWriter
+    var objectsWritten = 0
     try {
       val it = currentMap.destructiveSortedIterator(comparator)
       while (it.hasNext) {
         val kv = it.next()
         writer.write(kv)
+        objectsWritten += 1
+
+        if (objectsWritten == serializerBatchSize) {
+          writer.commit()
+          writer.close()
+          _diskBytesSpilled += writer.bytesWritten
+          writer = getNewWriter
+          objectsWritten = 0
+        }
       }
-      writer.commit()
+
+      if (objectsWritten > 0) writer.commit()
     } finally {
       // Partial failures cannot be tolerated; do not revert partial writes
       writer.close()
+      _diskBytesSpilled += writer.bytesWritten
     }
     currentMap = new SizeTrackingAppendOnlyMap[K, C]
-    spilledMaps.append(new DiskMapIterator(file))
+    spilledMaps.append(new DiskMapIterator(file, blockId))
 
     // Reset the amount of shuffle memory used by this map in the global pool
     val shuffleMemoryMap = SparkEnv.get.shuffleMemoryMap
@@ -161,7 +215,11 @@ private[spark] class ExternalAppendOnlyMap[K, V, C](
       shuffleMemoryMap(Thread.currentThread().getId) = 0
     }
     numPairsInMemory = 0
+    _memoryBytesSpilled += mapSize
   }
+
+  def memoryBytesSpilled: Long = _memoryBytesSpilled
+  def diskBytesSpilled: Long = _diskBytesSpilled
 
   /**
    * Return an iterator that merges the in-memory map with the spilled maps.
@@ -297,16 +355,35 @@ private[spark] class ExternalAppendOnlyMap[K, V, C](
   /**
    * An iterator that returns (K, C) pairs in sorted order from an on-disk map
    */
-  private class DiskMapIterator(file: File) extends Iterator[(K, C)] {
+  private class DiskMapIterator(file: File, blockId: BlockId) extends Iterator[(K, C)] {
     val fileStream = new FileInputStream(file)
-    val bufferedStream = new FastBufferedInputStream(fileStream)
-    val deserializeStream = ser.deserializeStream(bufferedStream)
+    val bufferedStream = new FastBufferedInputStream(fileStream, fileBufferSize)
+    val compressedStream = blockManager.wrapForCompression(blockId, bufferedStream)
+    var deserializeStream = ser.deserializeStream(compressedStream)
+    var objectsRead = 0
+
     var nextItem: (K, C) = null
     var eof = false
 
     def readNextItem(): (K, C) = {
       if (!eof) {
         try {
+          if (objectsRead == serializerBatchSize) {
+            val newInputStream = deserializeStream match {
+              case stream: KryoDeserializationStream =>
+                // Kryo's serializer stores an internal buffer that pre-fetches from the underlying
+                // stream. We need to capture this buffer and feed it to the new serialization
+                // stream so that the bytes are not lost.
+                val kryoInput = stream.input
+                val remainingBytes = kryoInput.limit() - kryoInput.position()
+                val extraBuf = kryoInput.readBytes(remainingBytes)
+                new SequenceInputStream(new ByteArrayInputStream(extraBuf), compressedStream)
+              case _ => compressedStream
+            }
+            deserializeStream = ser.deserializeStream(newInputStream)
+            objectsRead = 0
+          }
+          objectsRead += 1
           return deserializeStream.readObject().asInstanceOf[(K, C)]
         } catch {
           case e: EOFException =>

@@ -240,10 +240,6 @@ class SparkContext(
     localProperties.set(props)
   }
 
-  def initLocalProperties() {
-    localProperties.set(new Properties())
-  }
-
   /**
    * Set a local property that affects jobs submitted from this thread, such as the
    * Spark fair scheduler pool.
@@ -308,7 +304,7 @@ class SparkContext(
   private val dagSchedulerSource = new DAGSchedulerSource(this.dagScheduler, this)
   private val blockManagerSource = new BlockManagerSource(SparkEnv.get.blockManager, this)
 
-  def initDriverMetrics() {
+  private def initDriverMetrics() {
     SparkEnv.get.metricsSystem.registerSource(dagSchedulerSource)
     SparkEnv.get.metricsSystem.registerSource(blockManagerSource)
   }
@@ -340,8 +336,8 @@ class SparkContext(
    * Hadoop-supported file system URI, and return it as an RDD of Strings.
    */
   def textFile(path: String, minSplits: Int = defaultMinSplits): RDD[String] = {
-    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text], minSplits)
-      .map(pair => pair._2.toString)
+    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
+      minSplits, cloneRecords = false).map(pair => pair._2.toString)
   }
 
   /**
@@ -708,8 +704,11 @@ class SparkContext(
                 env.httpFileServer.addJar(new File(fileName))
               } catch {
                 case e: Exception => {
+                  // For now just log an error but allow to go through so spark examples work.
+                  // The spark examples don't really need the jar distributed since its also 
+                  // the app jar.
                   logError("Error adding jar (" + e + "), was the --addJars option used?")
-                  throw e
+                  null
                 }
               }
             } else {
@@ -722,8 +721,10 @@ class SparkContext(
             path
         }
       }
-      addedJars(key) = System.currentTimeMillis
-      logInfo("Added JAR " + path + " at " + key + " with timestamp " + addedJars(key))
+      if (key != null) {
+        addedJars(key) = System.currentTimeMillis
+        logInfo("Added JAR " + path + " at " + key + " with timestamp " + addedJars(key))
+      }
     }
   }
 
@@ -956,6 +957,8 @@ class SparkContext(
     }
   }
 
+  def getCheckpointDir = checkpointDir
+
   /** Default level of parallelism to use when not given by user (e.g. parallelize and makeRDD). */
   def defaultParallelism: Int = taskScheduler.defaultParallelism
 
@@ -1125,7 +1128,7 @@ object SparkContext {
     if (sparkHome != null) {
       res.setSparkHome(sparkHome)
     }
-    if (!jars.isEmpty) {
+    if (jars != null && !jars.isEmpty) {
       res.setJars(jars)
     }
     res.setExecutorEnv(environment.toSeq)

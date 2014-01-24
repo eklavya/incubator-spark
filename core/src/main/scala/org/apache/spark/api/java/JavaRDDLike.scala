@@ -124,6 +124,18 @@ trait JavaRDDLike[T, This <: JavaRDDLike[T, This]] extends Serializable {
   }
 
   /**
+   * FlatMaps f over this RDD, where f takes an additional parameter of type A.  This
+   * additional parameter is produced by constructA, which is called in each
+   * partition with the index of that partition.
+   */
+  def flatMapWith[A, U](constructA: JFunction[Int, A], f: FlatMapFunction2[T, A, U]): JavaRDD[U] = {
+    import scala.collection.JavaConverters._
+    def fn = (x: T, y: A) => f.apply(x, y).asScala
+    JavaRDD.fromRDD(
+      rdd.flatMapWith(x => constructA(x))((x, y) => fn(x, y))(f.elementType()))(f.elementType())
+  }
+
+  /**
    * Return a new RDD by applying a function to each partition of this RDD.
    */
   def mapPartitions[U](f: FlatMapFunction[java.util.Iterator[T], U]): JavaRDD[U] = {
@@ -266,6 +278,15 @@ trait JavaRDDLike[T, This <: JavaRDDLike[T, This]] extends Serializable {
   def foreach(f: VoidFunction[T]) {
     val cleanF = rdd.context.clean(f)
     rdd.foreach(cleanF)
+  }
+
+  /**
+   * Applies f to each element of this RDD, where f takes an additional parameter of type A.
+   * This additional parameter is produced by constructA, which is called in each
+   * partition with the index of that partition.
+   */
+  def foreachWith[A](constructA: JFunction[Int, A], f: VoidFunction2[T, A]) {
+    rdd.foreachWith[A]((x) => constructA(x))((x, y) => f.call(x, y))
   }
 
   /**
