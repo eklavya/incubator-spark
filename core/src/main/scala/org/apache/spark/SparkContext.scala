@@ -240,7 +240,7 @@ class SparkContext(
     localProperties.set(props)
   }
 
-  @deprecated("Properties no longer need to be explicitly initialized.")
+  @deprecated("Properties no longer need to be explicitly initialized.", "0.9.1")
   def initLocalProperties() {
     localProperties.set(new Properties())
   }
