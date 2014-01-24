@@ -240,6 +240,11 @@ class SparkContext(
     localProperties.set(props)
   }
 
+  @deprecated("Properties no longer need to be explicitly initialized.")
+  def initLocalProperties() {
+    localProperties.set(new Properties())
+  }
+
   /**
    * Set a local property that affects jobs submitted from this thread, such as the
    * Spark fair scheduler pool.
